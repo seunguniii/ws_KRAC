@@ -70,10 +70,10 @@ class OffboardControl : public rclcpp::Node {
 		
 		std::vector<std::array<float,3>> waypoints_ = {
 			{0.0f, 0.0f, -25.0f},
-			{200.0f, 0.0f, -25.0f},
-			{400.0f, 200.0f, -25.0f},
-			{200.0f, -400.0f, -25.0f},
-			{200.0f, 0.0f, -25.0f},
+			{100.0f, 0.0f, -25.0f},
+			{200.0f, 100.0f, -25.0f},
+			{200.0f, -100.0f, -25.0f},
+			{100.0f, 0.0f, -25.0f},
 			{0.0f, 0.0f, -25.0f},
 			{0.0f, 0.0f, 0.0f},
 		};
@@ -98,7 +98,7 @@ class OffboardControl : public rclcpp::Node {
 		void transition(FlightMode mode = MULTIROTOR);
 
 		void publish_vehicle_command(int command, float value);
-		float L1_guidance(float vx_, float vy_, float currx_, float curry_);
+		float k = 1;
 };
 
 void OffboardControl::arm() {
@@ -117,24 +117,13 @@ void OffboardControl::disarm() {
 
 void OffboardControl::publish_offboard_control_mode() {
 	OffboardControlMode msg {};
-	msg.position = flight_mode_ == MULTIROTOR? true:false;
-	msg.velocity = false;
-	msg.acceleration = flight_mode_ == MULTIROTOR? false:true;
+	msg.position = true;
+	msg.velocity = flight_mode_ == MULTIROTOR? false:true;
+	msg.acceleration = false;
 	msg.attitude = false;
 	msg.body_rate = false;
 	msg.timestamp = this->get_clock()->now().nanoseconds() / 1000;
 	offboard_control_mode_publisher_->publish(msg);
-}
-
-float OffboardControl::L1_guidance(float vx_, float vy_, float currx_, float curry_){
-	float sin_eta;
-	float v_size = sqrt(vx_*vx_ + vy_*vy_);
-	float L_size = sqrt(currx_*currx_ + curry_*curry_);
-	
-	if(v_size*L_size == 0) sin_eta = 0;
-	else sin_eta = (vx_*curry_ - vy_*currx_)/(v_size*L_size);
-	
-	return 2*v_size*v_size/L_size*sin_eta;
 }
 
 void OffboardControl::publish_trajectory_setpoint() {
@@ -151,12 +140,7 @@ void OffboardControl::publish_trajectory_setpoint() {
 	Eigen::Vector3f target(wp[0], wp[1], wp[2]);
 	Eigen::Vector3f to_wp = target - current;
 	float dist_to_wp = to_wp.norm();
-	
-	Eigen::Vector3f vel_frd(curr_odom_.velocity[0], curr_odom_.velocity[1], curr_odom_.velocity[2]);
-	Eigen::Quaternionf q_frd(curr_odom_.q[0], curr_odom_.q[1], curr_odom_.q[2], curr_odom_.q[3]);
-	Eigen::Quaternionf q_ned = q_frd.inverse();
-	Eigen::Vector3f desired_wp_frd = q_ned * to_wp;
-	Eigen::Vector3f acc_frd, acc_ned;
+	Eigen::Vector3f direction_v(to_wp.x()/dist_to_wp, to_wp.y()/dist_to_wp, to_wp.z()/dist_to_wp);
 
 	if (flight_mode_ == MULTIROTOR && armed_) {
 		RCLCPP_INFO(this->get_logger(), "[Multirotor] Distance to waypoint %ld: %f", wp_idx_, dist_to_wp);
@@ -177,18 +161,11 @@ void OffboardControl::publish_trajectory_setpoint() {
 	
 	else if (flight_mode_ == FIXED_WING) {
 		RCLCPP_INFO(this->get_logger(), "[Fixed-wing] Heading to projected point. WP: %ld, Dist: %.2f", wp_idx_, dist_to_wp);
-		RCLCPP_INFO(this->get_logger(), "[Fixed-wing] Desired Position %.2f, %.2f, %.2f\n", wp[0], wp[1], wp[2]);
 		
-		acc_frd << 0.0f,
-					L1_guidance(vel_frd.y(), vel_frd.x(), desired_wp_frd.y(), desired_wp_frd.x()),
-					L1_guidance(vel_frd.x(), vel_frd.z(), desired_wp_frd.x(), desired_wp_frd.z());
+		msg_fw.position = {wp[0], wp[1], wp[2]};
+		msg_fw.velocity = {k*direction_v.x(), k*direction_v.y(), 0};
 		
-		acc_ned = q_ned * acc_frd;
-		msg_fw.acceleration = {acc_ned[0], acc_ned[1], acc_ned[2]};
-		
-		if (dist_to_wp < 10.0f) {
-			wp_idx_++;
-		}
+		if (dist_to_wp < 10.0f) wp_idx_++;
 	}
 	
 	msg_fw.timestamp = this->get_clock()->now().nanoseconds() / 1000;
