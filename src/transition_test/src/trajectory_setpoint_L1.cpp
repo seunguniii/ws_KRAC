@@ -2,18 +2,16 @@
 #include <chrono>
 #include <vector>
 #include <stdint.h>
-#include <math.h>
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 
-#include <rclcpp/rclcpp.hpp>
+#include "rclcpp/rclcpp.hpp"
 
-#include <px4_msgs/msg/offboard_control_mode.hpp>
-#include <px4_msgs/msg/trajectory_setpoint.hpp>
-#include <px4_msgs/msg/goto_setpoint.hpp>
-#include <px4_msgs/msg/vehicle_command.hpp>
-#include <px4_msgs/msg/vehicle_control_mode.hpp>
-#include <px4_msgs/msg/vehicle_odometry.hpp>
+#include "px4_msgs/msg/offboard_control_mode.hpp"
+#include "px4_msgs/msg/trajectory_setpoint.hpp"
+#include "px4_msgs/msg/vehicle_command.hpp"
+#include "px4_msgs/msg/vehicle_control_mode.hpp"
+#include "px4_msgs/msg/vehicle_odometry.hpp"
 
 using namespace std::chrono;
 using namespace std::chrono_literals;
@@ -28,7 +26,6 @@ class OffboardControl : public rclcpp::Node {
 			offboard_control_mode_publisher_ = this->create_publisher<OffboardControlMode>("/fmu/in/offboard_control_mode", 10);
 			trajectory_setpoint_publisher_ = this->create_publisher<TrajectorySetpoint>("/fmu/in/trajectory_setpoint", 10);
 			vehicle_command_publisher_ = this->create_publisher<VehicleCommand>("/fmu/in/vehicle_command", 10);
-			goto_setpoint_publisher_ = this->create_publisher<GotoSetpoint>("/fmu/in/goto_setpoint", 10);
 			
 			auto timer_callback = [this]() -> void {
 				if(!has_odom_){
@@ -36,13 +33,16 @@ class OffboardControl : public rclcpp::Node {
 					return;
 				}
 
-				if (!armed_) {
+				if (!armed_ && mission_mode_ != FINISHED) {
 					this->publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 6);
 					this->arm();
 				}
 
 				publish_offboard_control_mode();
-				publish_trajectory_setpoint();
+				if (mission_mode_ == FLIGHT) publish_trajectory_setpoint();
+				else rescue_and_return();
+				
+				if (mission_mode_ == FINISHED) this->disarm();
 
 				offboard_setpoint_counter_++;
 			};
@@ -55,7 +55,6 @@ class OffboardControl : public rclcpp::Node {
 
 		rclcpp::Publisher<OffboardControlMode>::SharedPtr offboard_control_mode_publisher_;
 		rclcpp::Publisher<TrajectorySetpoint>::SharedPtr trajectory_setpoint_publisher_;
-		rclcpp::Publisher<GotoSetpoint>::SharedPtr goto_setpoint_publisher_;
 		rclcpp::Publisher<VehicleCommand>::SharedPtr vehicle_command_publisher_;
 
 		rclcpp::Subscription<px4_msgs::msg::VehicleOdometry>::SharedPtr odom_sub_;
@@ -66,7 +65,15 @@ class OffboardControl : public rclcpp::Node {
 		    MULTIROTOR = 3,
 		    FIXED_WING = 4
 		};
+		
+		enum Mission {
+			FLIGHT = 0,
+			RESCUE = 1,
+			FINISHED = 2
+		};
+		
 		FlightMode flight_mode_ = MULTIROTOR;
+		Mission mission_mode_ = FLIGHT;
 		
 		std::vector<std::array<float,3>> waypoints_ = {
 			{0.0f, 0.0f, -25.0f},
@@ -74,7 +81,15 @@ class OffboardControl : public rclcpp::Node {
 			{200.0f, 100.0f, -25.0f},
 			{200.0f, -100.0f, -25.0f},
 			{100.0f, 0.0f, -25.0f},
-			{0.0f, 0.0f, -25.0f},
+			{50.0f, -50.0f, -25.0f},
+		};
+
+		//temporary waypoints to mimic rescue
+		std::vector<std::array<float,3>> tempwp_ = {
+			{0.0f, -100.0f, -25.0f},
+			{0.0f, -100.0f, -5.0f},
+			{0.0f, -100.0f, -25.0f},
+			{0.0f, 100.0f, -25.0f},
 			{0.0f, 0.0f, 0.0f},
 		};
 
@@ -93,7 +108,7 @@ class OffboardControl : public rclcpp::Node {
 
 		void publish_offboard_control_mode();
 		void publish_trajectory_setpoint();
-		void rescue_mission();
+		void rescue_and_return();
 		void publish_vehicle_command(uint16_t command, float param1 = 0.0, float param2 = 0.0);
 		void transition(FlightMode mode = MULTIROTOR);
 
@@ -144,17 +159,15 @@ void OffboardControl::publish_trajectory_setpoint() {
 
 	if (flight_mode_ == MULTIROTOR && armed_) {
 		RCLCPP_INFO(this->get_logger(), "[Multirotor] Distance to waypoint %ld: %f", wp_idx_, dist_to_wp);
+		
 		msg_fw.position = {wp[0], wp[1], wp[2]};
 
 		if (dist_to_wp < 3.0f) {
 			hold_counter_++;
 			if (hold_counter_ > HOLD_THRESHOLD) {
 				hold_counter_ = 0;
-				if(wp_idx_ >= waypoints_.size() - 1) this->disarm();
 				wp_idx_++;
 				transition(FIXED_WING);
-
-				offboard_setpoint_counter_ = 0;
 			}
 		}
 	}
@@ -166,26 +179,41 @@ void OffboardControl::publish_trajectory_setpoint() {
 		msg_fw.velocity = {k*direction_v.x(), k*direction_v.y(), 0};
 		
 		if (dist_to_wp < 10.0f) wp_idx_++;
+
+		if (wp_idx_ + 1> waypoints_.size()){
+			transition(MULTIROTOR);
+			mission_mode_ = RESCUE;
+			wp_idx_ = 0;
+		}
 	}
 	
 	msg_fw.timestamp = this->get_clock()->now().nanoseconds() / 1000;
 	trajectory_setpoint_publisher_->publish(msg_fw);
 }
 
-void OffboardControl::rescue_mission() {
+void OffboardControl::rescue_and_return() {
 	TrajectorySetpoint msg {};
-	if(flight_mode_ == FIXED_WING) {
-		transition(MULTIROTOR);
-	}
-
+	auto &wp = tempwp_[wp_idx_];
+	
 	Eigen::Vector3f current(curr_odom_.position[0], curr_odom_.position[1], curr_odom_.position[2]);
-	Eigen::Vector3f target(0.0f, 0.0f, -50.0f);
+	Eigen::Vector3f target(wp[0], wp[1], wp[2]);
 	Eigen::Vector3f to_wp = target - current;
 	float dist_to_wp = to_wp.norm();
-	msg.position = {target[0], target[1], target[2]};
-	if(dist_to_wp < 0.3f) {
-		RCLCPP_INFO(this->get_logger(), "Rescue mission complete. Initiating landing sequence.");
+	
+	if(flight_mode_ == FIXED_WING) transition(MULTIROTOR);
+	msg.position = {wp[0], wp[1], wp[2]};
+	if (dist_to_wp < 1.0f){
+		hold_counter_++;
+		if (hold_counter_ > HOLD_THRESHOLD) {
+			hold_counter_ = 0;
+			wp_idx_++;
+			
+			if (wp_idx_ - 1 > tempwp_.size()) mission_mode_ = FINISHED;
+		}
 	}
+	
+	msg.timestamp = this->get_clock()->now().nanoseconds() / 1000;
+	trajectory_setpoint_publisher_->publish(msg);
 }
 
 void OffboardControl::publish_vehicle_command(uint16_t command, float param1, float param2) {
