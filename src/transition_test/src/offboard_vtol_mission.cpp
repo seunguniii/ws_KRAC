@@ -137,36 +137,35 @@ private:
         offboard_control_mode_publisher_->publish(msg);
     }
 
-void publish_trajectory_setpoint() {
-    if (curr_odom_.timestamp == 0) return;
-    auto &wp = waypoints_[wp_idx_];
-    Eigen::Vector3f cur(curr_odom_.position[0], curr_odom_.position[1], curr_odom_.position[2]);
-    Eigen::Vector3f tgt(wp[0], wp[1], wp[2]);
-    float dist = (tgt - cur).norm();
-    Eigen::Vector3f dir = (tgt - cur).normalized();
+    void publish_trajectory_setpoint() {
+        if (curr_odom_.timestamp == 0) return;
+        auto &wp = waypoints_[wp_idx_];
+        Eigen::Vector3f cur(curr_odom_.position[0], curr_odom_.position[1], curr_odom_.position[2]);
+        Eigen::Vector3f tgt(wp[0], wp[1], wp[2]);
+        float dist = (tgt - cur).norm();
+        Eigen::Vector3f dir = (tgt - cur).normalized();
 
-    TrajectorySetpoint msg{};
-    if (flight_mode_ == MULTIROTOR && armed_) {
-        // ← 멀티콥터 모드 거리 로그
-        RCLCPP_INFO(this->get_logger(),
-            "[Multirotor] WP: %zu, Dist: %.2f", wp_idx_, dist);
+        TrajectorySetpoint msg{};
+        if (flight_mode_ == MULTIROTOR && armed_) {
+        
+            RCLCPP_INFO(this->get_logger(),
+            	"[Multirotor] WP: %zu, Dist: %.2f", wp_idx_, dist);
 
-        msg.position = {wp[0], wp[1], wp[2]};
-        if (dist < 3.0f && ++hold_counter_ > HOLD_THRESHOLD) {
-            hold_counter_ = 0;
-            wp_idx_++;
-            transition(FIXED_WING);
-        }
-
-    } else if (flight_mode_ == FIXED_WING) {
-        // ← 고정익 모드 거리 로그
-        RCLCPP_INFO(this->get_logger(),
-            "[Fixed-wing] WP: %zu, Dist: %.2f", wp_idx_, dist);
-
-        msg.position = {wp[0], wp[1], wp[2]};
-        msg.velocity = {k * dir.x(), k * dir.y(), 0.0f};
-        if (dist < 10.0f) {
-            wp_idx_++;
+        
+            msg.position = {wp[0], wp[1], wp[2]};
+            if (dist < 3.0f && ++hold_counter_ > HOLD_THRESHOLD) {
+                hold_counter_ = 0;
+                wp_idx_++;
+                transition(FIXED_WING);
+            }
+        } else if (flight_mode_ == FIXED_WING) {
+        
+            RCLCPP_INFO(this->get_logger(),
+            	"[Fixed-wing] WP: %zu, Dist: %.2f", wp_idx_, dist);
+        
+            msg.position = {wp[0], wp[1], wp[2]};
+            msg.velocity = {k * dir.x(), k * dir.y(), 0.0f};
+            if (dist < 10.0f) wp_idx_++;
             if (wp_idx_ >= waypoints_.size()) {
                 transition(MULTIROTOR);
                 mission_mode_ = RESCUE;
@@ -174,12 +173,9 @@ void publish_trajectory_setpoint() {
                 hold_counter_ = 0;
             }
         }
+        msg.timestamp = this->get_clock()->now().nanoseconds() / 1000;
+        trajectory_setpoint_publisher_->publish(msg);
     }
-
-    msg.timestamp = this->get_clock()->now().nanoseconds() / 1000;
-    trajectory_setpoint_publisher_->publish(msg);
-}
-
 
     void rescue_and_return() {
         // 완료 후에도 마지막 위치 유지
