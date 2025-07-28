@@ -121,7 +121,7 @@ class OffboardControl : public rclcpp::Node {
 		float accurate_altitude_ = 0.0f;
 
 		float low_enough_ = -0.5f; // m
-		float descent_step_ = 3.0f; // *0.5 m/s (inaccurate-calculated heuristically)
+		float descent_step_ = 0.2f; // *0.5 m/s (inaccurate-calculated heuristically)
 
 		Mission mission_mode_ = FLIGHT;
 };
@@ -161,7 +161,7 @@ void OffboardControl::publish_trajectory_setpoint() {
 	TrajectorySetpoint msg {};
 
 	Eigen::Vector3f current(curr_odom_.position[0], curr_odom_.position[1], curr_odom_.position[2]);
-	Eigen::Vector3f target(0, 0, -25);
+	Eigen::Vector3f target(0, 0, -10);
 	Eigen::Vector3f to_wp = target - current;
 	float dist_to_wp = to_wp.norm();
 
