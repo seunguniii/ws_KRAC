@@ -121,7 +121,7 @@ class OffboardControl : public rclcpp::Node {
 		float accurate_altitude_ = 0.0f;
 
 		float low_enough_ = -0.5f; // m
-		float descent_step_ = 3.0f; // *5 m/s (inaccurate-calculated heuristically)
+		float descent_step_ = 3.0f; // *0.5 m/s (inaccurate-calculated heuristically)
 
 		Mission mission_mode_ = FLIGHT;
 };
