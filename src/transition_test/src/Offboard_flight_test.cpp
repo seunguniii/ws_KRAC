@@ -124,7 +124,7 @@ private:
     void publish_offboard_control_mode() {
         OffboardControlMode msg{};
         msg.position     = true;
-        msg.velocity     = (flight_mode_ == MULTIROTOR) ? false : true;
+        msg.velocity     = true;
         msg.acceleration = false;
         msg.attitude     = false;
         msg.body_rate    = false;
@@ -144,6 +144,12 @@ private:
         
             RCLCPP_INFO(this->get_logger(),
             	"[Multirotor] WP: %zu, Dist: %.2f", wp_idx_, dist);
+
+            const float MAX_SPEED = 0.3f;  // 원하는 최대 속도
+            Eigen::Vector3f dir = tgt - cur;
+            if (dist > 0.01f) dir.normalize();
+            Eigen::Vector3f vel = dir * MAX_SPEED;
+            msg.velocity = {vel[0], vel[1], vel[2]};
 
             msg.position = {wp[0], wp[1], wp[2]};
             if (dist < 3.0f) {
