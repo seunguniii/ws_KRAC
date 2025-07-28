@@ -23,8 +23,7 @@ class OffboardControl : public rclcpp::Node {
 public:
     OffboardControl() : Node("test") {
         // 오도메트리 구독
-        odom_sub_ = this->create_subscription<VehicleOdometry>(
-            "/fmu/out/vehicle_odometry", rclcpp::SensorDataQoS(),
+        odom_sub_ = this->create_subscription<VehicleOdometry>( "/fmu/out/vehicle_odometry", rclcpp::SensorDataQoS(),
             [this](const VehicleOdometry::SharedPtr msg) {
                 curr_odom_ = *msg;
                 has_odom_ = true;
