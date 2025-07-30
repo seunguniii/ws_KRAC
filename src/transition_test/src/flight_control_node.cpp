@@ -199,9 +199,9 @@ void OffboardControl::rescue_and_return() {
 	Eigen::Vector3f current(curr_odom_.position[0], curr_odom_.position[1], curr_odom_.position[2]);
 	TrajectorySetpoint msg {};
 	
-	msg.position = {curr_odom_.position.x() + target_from_sub_x_, 
-					curr_odom_.position.y() + target_from_sub_y_, 
-					curr_odom_.position.z() + target_from_sub_z_}; //not sure how to control descent velocity yet
+	msg.position = {curr_odom_.position[0] + target_from_sub_x_, 
+					curr_odom_.position[1] + target_from_sub_y_, 
+					curr_odom_.position[2] + target_from_sub_z_}; //not sure how to control descent velocity yet
 	
 	msg.timestamp = this->get_clock()->now().nanoseconds() / 1000;
 	trajectory_setpoint_publisher_->publish(msg);
