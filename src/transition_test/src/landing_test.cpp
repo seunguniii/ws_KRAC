@@ -33,7 +33,7 @@ class OffboardControl : public rclcpp::Node {
 				target_from_sub_y_ = msg->point.y;
 				accurate_altitude_ = msg->point.z;
 			});
-			
+
 			land_sub_ = this->create_subscription<px4_msgs::msg::VehicleLandDetected>("/fmu/out/vehicle_land_detected", rclcpp::SensorDataQoS(),
 			[this](const px4_msgs::msg::VehicleLandDetected::SharedPtr msg) {
 				landed_ = msg->landed;
@@ -55,19 +55,23 @@ class OffboardControl : public rclcpp::Node {
 				}
 
 				publish_offboard_control_mode();
-				
-				switch (mission_mode_){
+
+				switch (mission_mode_) {
 					default:
 					case FLIGHT:
 						publish_trajectory_setpoint();
 						break;
-					
+
 					case LANDING:
 						land();
 						break;
-						
+
 					case FINISHED:
-						if(landed_ && armed_) disarm();
+						if(landed_ && armed_) {
+							disarm();
+							disarm();
+							disarm();
+						}
 						if(!armed_) return;
 						break;
 				}
@@ -121,9 +125,10 @@ class OffboardControl : public rclcpp::Node {
 		float accurate_altitude_ = 0.0f;
 
 		float low_enough_ = -0.5f; // m
-		float descent_step_ = 0.2f; // *0.5 m/s (inaccurate-calculated heuristically)
+		float descent_step_ = 0.1f; // *0.5~1.0 m/s (inaccurate-calculated heuristically)
 
 		Mission mission_mode_ = FLIGHT;
+		//Eigen::Vector3f targetNED{0, 0, 0};
 };
 
 void OffboardControl::arm() {
@@ -187,10 +192,15 @@ void OffboardControl::land() {
 
 	//fake altitude value, delete this line to use lidar value(published as /tag_fused_point.z) for altitude
 	//refer desired_setpoint_subscriber
-	accurate_altitude_ = curr_odom_.position[2];
+	//accurate_altitude_ = curr_odom_.position[2];
 
 	Eigen::Vector3f current(curr_odom_.position[0], curr_odom_.position[1], accurate_altitude_); //current coordinate with altitude replaced with lidar value
-	Eigen::Vector3f targetFRD(target_from_sub_x_, target_from_sub_y_, 0); //target coordinate in frd frame from /tag_fused_point
+	float k = -accurate_altitude_; //(10 - accurate_altitude_)*0.5;
+	Eigen::Vector3f targetFRD(0, 0, 0);
+	if(target_from_sub_x_ != 0 || target_from_sub_y_ != 0) {
+		targetFRD = {target_from_sub_y_*k, target_from_sub_x_*k, 0}; //target coordinate in frd frame from /tag_fused_point
+		//targetNED = current + q * targetFRD; //convert frd coordinate to ned coordinate
+	}
 	Eigen::Vector3f targetNED = current + q * targetFRD; //convert frd coordinate to ned coordinate
 
 	msg.position = {targetNED[0], targetNED[1], accurate_altitude_ + descent_step_};
@@ -203,6 +213,8 @@ void OffboardControl::land() {
 	trajectory_setpoint_publisher_->publish(msg);
 	if(accurate_altitude_ > low_enough_) {
 		mission_mode_ = FINISHED;
+		publish_vehicle_command(px4_msgs::msg::VehicleCommand::VEHICLE_CMD_NAV_LAND);
+		publish_vehicle_command(px4_msgs::msg::VehicleCommand::VEHICLE_CMD_NAV_LAND);
 		publish_vehicle_command(px4_msgs::msg::VehicleCommand::VEHICLE_CMD_NAV_LAND);
 		RCLCPP_INFO(this->get_logger(), "[Landing] low enough at altitude %.3f. sending land command", -accurate_altitude_);
 	}
