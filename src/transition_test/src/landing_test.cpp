@@ -166,7 +166,7 @@ void OffboardControl::publish_trajectory_setpoint() {
 	TrajectorySetpoint msg {};
 
 	Eigen::Vector3f current(curr_odom_.position[0], curr_odom_.position[1], curr_odom_.position[2]);
-	Eigen::Vector3f target(0, 0, -10);
+	Eigen::Vector3f target(0, 0, -5);
 	Eigen::Vector3f to_wp = target - current;
 	float dist_to_wp = to_wp.norm();
 
@@ -199,7 +199,6 @@ void OffboardControl::land() {
 	Eigen::Vector3f targetFRD(0, 0, 0);
 	if(target_from_sub_x_ != 0 || target_from_sub_y_ != 0) {
 		targetFRD = {target_from_sub_y_*k, target_from_sub_x_*k, 0}; //target coordinate in frd frame from /tag_fused_point
-		//targetNED = current + q * targetFRD; //convert frd coordinate to ned coordinate
 	}
 	Eigen::Vector3f targetNED = current + q * targetFRD; //convert frd coordinate to ned coordinate
 
