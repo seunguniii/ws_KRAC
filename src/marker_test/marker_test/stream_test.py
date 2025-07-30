@@ -162,11 +162,13 @@ class AprilTagLidarFusionNode(Node):
             # ★ 픽셀 → 미터 변환 (카메라 내부 파라미터 사용)
             fx = self._CAMERA_MATRIX[0, 0]
             fy = self._CAMERA_MATRIX[1, 1]
+
+            height, width = frame.shape[:2]
             cx0 = width/2 #self._CAMERA_MATRIX[0, 2]
             cy0 = height/2 #self._CAMERA_MATRIX[1, 2]
 
             dx = cx - cx0
-            dy = cy - cy0
+            dy = cy0 - cy
 
             # self._latest_z는 보정된 카메라 높이(수직 z). 카메라 optical axis와 정렬 가정.
             x_m = (dx / fx)
