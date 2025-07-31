@@ -174,13 +174,16 @@ class AprilTagLidarFusionNode(Node):
             x_m = (dx / fx)
             y_m = (dy / fy)
 
-            msg = PointStamped()
-            msg.header.stamp = self.get_clock().now().to_msg()
-            msg.header.frame_id = self._frame_id
-            msg.point.x = float(x_m)
-            msg.point.y = float(y_m)
-            msg.point.z = 0.0
-            self._pub_point.publish(msg)
+        else:
+            x_m, y_m = 0.0, 0.0
+
+        msg = PointStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = self._frame_id
+        msg.point.x = float(x_m)
+        msg.point.y = float(y_m)
+        msg.point.z = 0.0
+        self._pub_point.publish(msg)
 
             if self._publish_debug:
                 cv2.drawMarker(
